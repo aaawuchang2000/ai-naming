@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 起名</title>
+<style>
+  :root {
+    --teal: #0d9488;
+    --teal-dark: #0f766e;
+    --ink: #1f2937;
+    --muted: #6b7280;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #e0f2fe, #ccfbf1);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    padding: 20px;
+  }
+  .card {
+    width: 100%;
+    max-width: 640px;
+    background: #fff;
+    border-radius: 16px;
+    padding: 36px 32px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
+  }
+  h1 { font-size: 28px; color: var(--ink); margin-bottom: 6px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+  label { display: block; font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+  textarea {
+    width: 100%;
+    min-height: 110px;
+    padding: 12px 14px;
+    font-size: 15px;
+    line-height: 1.6;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    resize: vertical;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15); }
+  .row { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+  button {
+    padding: 10px 22px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--teal);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  button:hover { background: var(--teal-dark); }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  #status { font-size: 13px; color: var(--muted); }
+  #status.ok { color: var(--teal-dark); }
+  .result {
+    margin-top: 20px;
+    padding: 16px 18px;
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    font-size: 15px;
+    line-height: 1.9;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .error {
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #b91c1c;
+    border-radius: 10px;
+    font-size: 14px;
+    white-space: pre-wrap;
+  }
+  .cursor::after { content: "▍"; color: var(--teal); animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (max-width: 480px) { .card { padding: 24px 18px; } }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>AI 起名</h1>
+  <p class="sub">输入你的起名需求，AI 会给出 3 组名字方案及寓意解释（结果流式输出）</p>
+
+  <label for="requirement">起名需求</label>
+  <textarea id="requirement" placeholder="例如：给姓张的男孩起名，希望大气、有文化底蕴、避开生僻字"></textarea>
+
+  <div class="row">
+    <button id="btn">开始起名</button>
+    <span id="status"></span>
+  </div>
+
+  <div id="result" class="result" hidden></div>
+  <div id="error" class="error" hidden></div>
+</main>
+
+<script>
+(function () {
+  const btn = document.getElementById('btn');
+  const ta = document.getElementById('requirement');
+  const statusEl = document.getElementById('status');
+  const resultEl = document.getElementById('result');
+  const errorEl = document.getElementById('error');
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.hidden = false;
+  }
+  function clearError() {
+    errorEl.textContent = '';
+    errorEl.hidden = true;
+  }
+
+  btn.addEventListener('click', async function () {
+    const requirement = ta.value.trim();
+    if (!requirement) { showError('请输入起名需求'); return; }
+
+    clearError();
+    btn.disabled = true;
+    statusEl.textContent = 'AI 思考中…';
+    statusEl.className = '';
+    resultEl.textContent = '';
+    resultEl.hidden = false;
+    resultEl.classList.add('cursor');
+
+    try {
+      const resp = await fetch('/api/name', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requirement })
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        let msg = '服务器返回 ' + resp.status;
+        try { msg = JSON.parse(text).error || msg; } catch (e) { /* 保留默认信息 */ }
+        throw new Error(msg);
+      }
+
+      // 读取 SSE 流
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop();
+        for (const part of parts) {
+          const dataLine = part.split('\n').find(function (l) { return l.startsWith('data:'); });
+          if (!dataLine) continue;
+          const raw = dataLine.slice(5).trim();
+          if (!raw || raw === '[DONE]') continue;
+
+          let payload;
+          try { payload = JSON.parse(raw); } catch (e) { continue; }
+
+          if (payload.type === 'delta') {
+            resultEl.textContent += payload.content;
+          } else if (payload.type === 'done') {
+            if (payload.saved) {
+              statusEl.textContent = '完成，已保存到数据库（模型：' + payload.model + '）';
+              statusEl.className = 'ok';
+            } else {
+              statusEl.textContent = '生成完成，但保存失败';
+              showError(payload.saveError || '未知原因');
+            }
+          } else if (payload.type === 'error') {
+            showError(payload.message);
+            statusEl.textContent = '出错了';
+          }
+        }
+      }
+      resultEl.classList.remove('cursor');
+    } catch (err) {
+      showError(err.message || String(err));
+      statusEl.textContent = '出错了';
+      resultEl.classList.remove('cursor');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>

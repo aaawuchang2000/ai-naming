@@ -1,0 +1,12 @@
+{
+  "name": "ai-naming",
+  "version": "1.0.0",
+  "description": "AI 起名：调用豆包·火山方舟流式生成 3 组名字方案，并保存到 Supabase",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "vercel dev"
+  }
+}
